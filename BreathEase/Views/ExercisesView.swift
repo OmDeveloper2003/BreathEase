@@ -77,32 +77,72 @@ struct Exercise: Identifiable {
 struct ExerciseCard: View {
     let exercise: Exercise
     @State private var isHovered = false
+    @State private var particleSystem = ParticleSystem()
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: exercise.icon)
-                .font(.title)
-                .foregroundStyle(exercise.color)
-                .symbolEffect(.bounce, options: .repeat(2), value: isHovered)
+        ZStack {
+            // Particle effect background
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    particleSystem.update(date: timeline.date)
+                    context.addFilter(.blur(radius: 20))
+                    context.drawLayer { ctx in
+                        for particle in particleSystem.particles {
+                            let rect = CGRect(
+                                x: particle.x,
+                                y: particle.y,
+                                width: particle.size,
+                                height: particle.size
+                            )
+                            ctx.opacity = particle.opacity
+                            ctx.fill(Path(ellipseIn: rect), with: .color(particle.color))
+                        }
+                    }
+                }
+            }
+            .opacity(isHovered ? 1 : 0)
             
-            Text(exercise.name)
-                .font(.headline)
-            
-            Text("\(exercise.duration) min")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            // Card content
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: exercise.icon)
+                    .font(.title)
+                    .foregroundStyle(exercise.color)
+                    .symbolEffect(.bounce.byLayer, options: .repeating, value: isHovered)
+                
+                Text(exercise.name)
+                    .font(.headline)
+                
+                Text("\(exercise.duration) min")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(.gray.opacity(0.2))
+                            .frame(height: 4)
+                        
+                        Rectangle()
+                            .fill(Theme.gradient)
+                            .frame(width: isHovered ? geometry.size.width : 0, height: 4)
+                    }
+                }
+                .frame(height: 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.dimensions.cornerRadius.medium))
+            .shadow(radius: isHovered ? Theme.shadows.medium.radius : Theme.shadows.small.radius)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 15)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.1), radius: 5)
-        )
         .scaleEffect(isHovered ? 1.05 : 1)
         .onHover { hovering in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            withAnimation(Theme.springAnimation.smooth) {
                 isHovered = hovering
+                if hovering {
+                    particleSystem.start()
+                }
             }
         }
     }
@@ -110,12 +150,22 @@ struct ExerciseCard: View {
 
 struct FeaturedExerciseCard: View {
     @State private var isAnimating = false
+    @State private var rotationAngle: Double = 0
     
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text("Featured Exercise")
-                .font(.title2)
-                .bold()
+            HStack {
+                Text("Featured Exercise")
+                    .font(.title2)
+                    .bold()
+                
+                Spacer()
+                
+                Image(systemName: "sparkles")
+                    .font(.title3)
+                    .foregroundStyle(Theme.gradient)
+                    .floating()
+            }
             
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
@@ -124,27 +174,56 @@ struct FeaturedExerciseCard: View {
                     Text("Perfect for stress relief")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    
+                    // Progress indicators
+                    HStack(spacing: 4) {
+                        ForEach(0..<4) { index in
+                            Circle()
+                                .fill(Theme.gradient)
+                                .frame(width: 8, height: 8)
+                                .opacity(isAnimating ? 1 : 0.3)
+                                .animation(
+                                    .easeInOut(duration: 1)
+                                    .repeatForever()
+                                    .delay(Double(index) * 0.2),
+                                    value: isAnimating
+                                )
+                        }
+                    }
+                    .padding(.top, 8)
                 }
                 
                 Spacer()
                 
-                Circle()
-                    .fill(Theme.gradient)
-                    .frame(width: 60, height: 60)
-                    .overlay {
-                        Image(systemName: "play.fill")
-                            .font(.title2)
-                            .foregroundStyle(.white)
-                            .scaleEffect(isAnimating ? 1.2 : 1)
-                            .animation(.easeInOut(duration: 1).repeatForever(), value: isAnimating)
-                    }
+                ZStack {
+                    Circle()
+                        .fill(Theme.gradient)
+                        .frame(width: 70, height: 70)
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.3), lineWidth: 2)
+                                .scaleEffect(isAnimating ? 1.3 : 1)
+                                .opacity(isAnimating ? 0 : 1)
+                        }
+                    
+                    Image(systemName: "play.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .rotationEffect(.degrees(rotationAngle))
+                        .scaleEffect(isAnimating ? 1.1 : 1)
+                }
+                .pulsingAnimation()
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .glassMorphic()
         .onAppear {
-            isAnimating = true
+            withAnimation(Theme.springAnimation.bouncy.repeatForever(autoreverses: true)) {
+                isAnimating = true
+            }
+            withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
+                rotationAngle = 360
+            }
         }
     }
 }
@@ -231,6 +310,58 @@ struct ExerciseDetailView: View {
                     dismiss()
                 }
             }
+        }
+    }
+}
+
+class ParticleSystem {
+    struct Particle: Identifiable {
+        let id = UUID()
+        var x: Double
+        var y: Double
+        var size: Double
+        var color: Color
+        var opacity: Double
+        var speed: Double
+        var angle: Double
+    }
+    
+    var particles = [Particle]()
+    let colors: [Color] = [.blue, .purple, .pink]
+    
+    func start() {
+        particles = (0..<20).map { _ in
+            Particle(
+                x: .random(in: 0...300),
+                y: .random(in: 0...200),
+                size: .random(in: 2...6),
+                color: colors.randomElement() ?? .blue,
+                opacity: .random(in: 0.1...0.5),
+                speed: .random(in: 20...40),
+                angle: .random(in: 0...360)
+            )
+        }
+    }
+    
+    func update(date: Date) {
+        var updated = [Particle]()
+        
+        for particle in particles {
+            var updatedParticle = particle
+            
+            updatedParticle.x += cos(particle.angle) * particle.speed / 60
+            updatedParticle.y += sin(particle.angle) * particle.speed / 60
+            updatedParticle.opacity -= 0.01
+            
+            if updatedParticle.opacity > 0 {
+                updated.append(updatedParticle)
+            }
+        }
+        
+        particles = updated
+        
+        if particles.isEmpty {
+            start()
         }
     }
 } 

@@ -3,6 +3,8 @@ import SwiftUI
 struct HomeView: View {
     @State private var isAnalyzing = false
     @State private var breathingScore: Double = 0
+    @State private var showPulseRings = false
+    @State private var ringProgress: CGFloat = 0
     
     var body: some View {
         NavigationView {
@@ -18,10 +20,11 @@ struct HomeView: View {
                                 Text("Today's Breathing")
                                     .font(.title2)
                                     .bold()
+                                
                                 Spacer()
-                                Circle()
-                                    .fill(breathingScore > 80 ? Theme.success : Theme.warning)
-                                    .frame(width: 12, height: 12)
+                                
+                                // Animated score indicator
+                                ScoreIndicator(score: breathingScore)
                             }
                             
                             // Waveform visualization
@@ -34,30 +37,63 @@ struct HomeView: View {
                                     WaveformView()
                                         .transition(.scale.combined(with: .opacity))
                                 } else {
-                                    Text("Start breathing analysis")
-                                        .foregroundStyle(.secondary)
+                                    VStack(spacing: 10) {
+                                        Image(systemName: "waveform")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(Theme.gradient)
+                                            .floating()
+                                        Text("Start breathing analysis")
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
                         .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 25)
-                                .fill(.ultraThinMaterial)
-                                .shadow(color: .black.opacity(0.1), radius: 10)
-                        )
+                        .glassMorphic()
                         .padding(.horizontal)
                         
-                        // Main action button with breathing animation
+                        // Breathing rings animation
                         ZStack {
-                            Circle()
-                                .fill(Theme.gradient)
-                                .frame(width: isAnalyzing ? 150 : 120, height: isAnalyzing ? 150 : 120)
-                                .scaleEffect(isAnalyzing ? 1.1 : 1.0)
-                                .animation(Theme.breathingAnimation.repeatForever(autoreverses: true), value: isAnalyzing)
+                            // Outer pulse rings
+                            if showPulseRings {
+                                ForEach(0..<3) { index in
+                                    Circle()
+                                        .stroke(Theme.gradient, lineWidth: 1)
+                                        .scaleEffect(showPulseRings ? 2 : 1)
+                                        .opacity(showPulseRings ? 0 : 0.5)
+                                        .animation(
+                                            .easeOut(duration: 2)
+                                            .repeatForever(autoreverses: false)
+                                            .delay(Double(index) * 0.5),
+                                            value: showPulseRings
+                                        )
+                                }
+                            }
                             
+                            // Progress ring
+                            Circle()
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 8)
+                                .frame(width: 140, height: 140)
+                            
+                            Circle()
+                                .trim(from: 0, to: ringProgress)
+                                .stroke(Theme.gradient, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                                .frame(width: 140, height: 140)
+                                .rotationEffect(.degrees(-90))
+                            
+                            // Main action button
                             Button(action: {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                                     isAnalyzing.toggle()
+                                    showPulseRings = isAnalyzing
+                                    
+                                    if isAnalyzing {
+                                        withAnimation(.linear(duration: 2)) {
+                                            ringProgress = 1
+                                        }
+                                    } else {
+                                        ringProgress = 0
+                                    }
                                 }
                             }) {
                                 Circle()
@@ -77,36 +113,45 @@ struct HomeView: View {
                                         }
                                         .foregroundStyle(.white)
                                     }
-                                    .shadow(color: .black.opacity(0.2), radius: 10)
                             }
                         }
                         
                         // Quick stats with animated appearance
                         if isAnalyzing {
-                            HStack(spacing: 20) {
-                                ForEach(["Rate", "Depth", "Quality"], id: \.self) { stat in
-                                    StatCard(
-                                        title: stat,
-                                        value: "\(Int.random(in: 70...100))",
-                                        unit: stat == "Rate" ? "bpm" : "%"
-                                    )
-                                    .transition(.scale.combined(with: .opacity))
-                                }
+                            LazyVGrid(columns: [
+                                GridItem(.flexible()),
+                                GridItem(.flexible()),
+                                GridItem(.flexible())
+                            ], spacing: 20) {
+                                StatCard(
+                                    title: "Rate",
+                                    value: "\(Int.random(in: 12...20))",
+                                    unit: "bpm",
+                                    icon: "heart.fill"
+                                )
+                                StatCard(
+                                    title: "Depth",
+                                    value: "\(Int.random(in: 70...100))",
+                                    unit: "%",
+                                    icon: "lungs.fill"
+                                )
+                                StatCard(
+                                    title: "Quality",
+                                    value: "\(Int.random(in: 80...100))",
+                                    unit: "%",
+                                    icon: "checkmark.seal.fill"
+                                )
                             }
                             .padding(.horizontal)
+                            .transition(.moveAndFade)
                         }
                     }
                     .padding(.vertical)
                 }
                 .navigationTitle("BreathEase")
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: {}) {
-                            Image(systemName: "bell.badge")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(Theme.gradient)
-                                .symbolEffect(.bounce, options: .repeat(2))
-                        }
+                    ToolbarItem(placement: .topTrailing) {
+                        NotificationButton()
                     }
                 }
             }
@@ -114,30 +159,107 @@ struct HomeView: View {
     }
 }
 
+// Custom transition
+extension AnyTransition {
+    static var moveAndFade: AnyTransition {
+        .asymmetric(
+            insertion: .scale.combined(with: .opacity).combined(with: .slide),
+            removal: .scale.combined(with: .opacity)
+        )
+    }
+}
+
+// Enhanced StatCard
 struct StatCard: View {
     let title: String
     let value: String
     let unit: String
+    let icon: String
+    @State private var showContent = false
     
     var body: some View {
         VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(Theme.gradient)
+                .scaleEffect(showContent ? 1 : 0)
+                .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(0.1), value: showContent)
+            
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .opacity(showContent ? 1 : 0)
+                .animation(.easeOut.delay(0.2), value: showContent)
+            
             Text(value)
                 .font(.title2)
                 .bold()
+                .opacity(showContent ? 1 : 0)
+                .animation(.easeOut.delay(0.3), value: showContent)
+            
             Text(unit)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .opacity(showContent ? 1 : 0)
+                .animation(.easeOut.delay(0.4), value: showContent)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 15)
-                .fill(Color(UIColor.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 5)
-        )
+        .glassMorphic()
+        .onAppear {
+            showContent = true
+        }
+    }
+}
+
+// Score indicator with animated ring
+struct ScoreIndicator: View {
+    let score: Double
+    @State private var showRing = false
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+                .frame(width: 40, height: 40)
+            
+            Circle()
+                .trim(from: 0, to: showRing ? score / 100 : 0)
+                .stroke(
+                    score > 80 ? Theme.success : Theme.warning,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .frame(width: 40, height: 40)
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 1), value: showRing)
+        }
+        .onAppear {
+            showRing = true
+        }
+    }
+}
+
+// Animated notification button
+struct NotificationButton: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        Button(action: {}) {
+            ZStack {
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.gradient)
+                    .symbolEffect(.bounce, options: .repeating, value: isAnimating)
+                
+                Circle()
+                    .fill(Theme.gradient)
+                    .frame(width: 8, height: 8)
+                    .offset(x: 6, y: -6)
+            }
+        }
+        .onAppear {
+            isAnimating = true
+        }
     }
 }
 
